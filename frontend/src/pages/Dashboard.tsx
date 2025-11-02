@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { requestAPI } from '../services/Api';
+import { requestAPI } from '../services/api';
 import { IRequest } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
 import ChatInterface from '../components/chatInterface';
