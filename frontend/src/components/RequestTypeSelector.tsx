@@ -6,15 +6,15 @@ interface Props {
   onChange: (v: RequestType) => void;
 }
 
-const labels: Record<RequestType, string> = {
+const labels = {
   salary: "Renégociation salariale",
   promotion: "Promotion",
   complaint: "Plainte",
   other: "Autre"
-};
+} as const;
 
 export default function RequestTypeSelector({ value, onChange }: Props) {
-  const opts: RequestType[] = ["salary", "promotion", "complaint", "other"];
+  const opts = ["salary", "promotion", "complaint", "other"] as const;
 
   return (
     <div className="flex flex-wrap gap-2">
