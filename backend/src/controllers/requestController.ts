@@ -2,17 +2,19 @@ import { Request as ExRequest, Response } from 'express';
 import ReqModel from '../models/Request';
 import { Message } from '../models/Message';
 import * as aiService from '../services/aiService';
-const generateSummaryAndScenarios = (aiService as any).generateSummaryAndScenarios;
 import { generatePDF } from '../services/pdfService';
 import path from 'path';
 import fs from 'fs';
+
+// Type correct de la fonction IA
+const generateSummaryAndScenarios = (aiService as any).generateSummaryAndScenarios;
 
 // ✅ Typage user injecté par middleware JWT
 interface AuthRequest extends ExRequest {
   user?: {
     id: string;
-    role: 'employee' | 'hr' | 'admin';
-  }
+    role?: 'employee' | 'hr' | 'admin';
+  };
 }
 
 // -----------------------
@@ -22,7 +24,10 @@ export async function createRequest(req: AuthRequest, res: Response) {
   try {
     const { type, title, description } = req.body;
     const employeeId = req.user?.id;
-    if (!employeeId) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!employeeId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const request = new ReqModel({
       employeeId,
@@ -31,6 +36,7 @@ export async function createRequest(req: AuthRequest, res: Response) {
       description,
       status: 'submitted'
     });
+
     await request.save();
 
     await new Message({
@@ -41,20 +47,22 @@ export async function createRequest(req: AuthRequest, res: Response) {
 
     // ✅ AI preprocessing
     const conv = [{ role: 'employee', content: description }];
-    const ai = await generateSummaryAndScenarios(conv, { title, type });
+    const ai = await generateSummaryAndScenarios(conv, { title, type }).catch(() => null);
 
     (request as any).aiSummary =
       ai?.summary ||
       ai?.summary_text ||
       (typeof ai === 'string' ? ai : JSON.stringify(ai));
 
-    (request as any).aiScenarios = ai?.scenarios ?? [];
+    (request as any).aiScenarios = Array.isArray(ai?.scenarios) ? ai.scenarios : [];
+
     await request.save();
 
-    res.json({ ok: true, request });
+    return res.json({ ok: true, request });
+
   } catch (err) {
     console.error('❌ createRequest error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 
@@ -67,18 +75,18 @@ export async function getRequests(req: AuthRequest, res: Response) {
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
     if (user.role === 'hr' || user.role === 'admin') {
-      const all = await ReqModel.find()
-        .populate('employeeId', 'email name');
+      const all = await ReqModel.find().populate('employeeId', 'email name');
       return res.json(all);
     }
 
     const list = await ReqModel.find({ employeeId: user.id })
       .populate('employeeId', 'email name');
 
-    res.json(list);
+    return res.json(list);
+
   } catch (err) {
     console.error('❌ getRequests error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 
@@ -91,12 +99,15 @@ export async function getRequestById(req: AuthRequest, res: Response) {
     const request = await ReqModel.findById(id)
       .populate('employeeId', 'email name');
 
-    if (!request) return res.status(404).json({ error: 'Not found' });
+    if (!request) {
+      return res.status(404).json({ error: 'Not found' });
+    }
 
-    res.json(request);
+    return res.json(request);
+
   } catch (err) {
     console.error('❌ getRequestById error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 
@@ -109,7 +120,9 @@ export async function exportRequestPdf(req: AuthRequest, res: Response) {
     const request = await ReqModel.findById(id)
       .populate('employeeId', 'email name');
 
-    if (!request) return res.status(404).json({ error: 'Not found' });
+    if (!request) {
+      return res.status(404).json({ error: 'Not found' });
+    }
 
     const uploadsDir = path.join(process.cwd(), 'uploads');
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
@@ -128,9 +141,10 @@ export async function exportRequestPdf(req: AuthRequest, res: Response) {
       outPath
     );
 
-    res.download(outPath, filename);
+    return res.download(outPath, filename);
+
   } catch (err) {
     console.error('❌ exportRequestPdf error:', err);
-    res.status(500).json({ error: 'Failed to generate PDF' });
+    return res.status(500).json({ error: 'Failed to generate PDF' });
   }
 }
