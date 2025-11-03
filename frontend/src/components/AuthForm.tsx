@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { authAPI } from '../services/api';
+import { authAPI } from '../services/Api';
 import { User } from '../types';
 
 interface AuthFormProps {

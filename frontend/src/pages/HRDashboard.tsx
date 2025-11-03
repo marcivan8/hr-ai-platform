@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import API from '../services/api';
+import API from '../services/Api';
 import { IRequest } from '../types';
 import { Link } from 'react-router-dom';
 

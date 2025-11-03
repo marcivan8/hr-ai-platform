@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { requestAPI } from '../services/api';
+import { requestAPI } from '../services/Api';
 import { IRequest } from '../types';
 import { ArrowLeft, Download, FileText, Clock, User, Tag } from 'lucide-react';
 
