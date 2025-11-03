@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { requestAPI } from '../services/Api';
+import { requestAPI } from '../services/api';
 import { BarChart3, Users, AlertCircle, CheckCircle, Clock, FileText, Download } from 'lucide-react';
 
 interface DashboardStats { total: number; pending: number; resolved: number; urgent: number; }

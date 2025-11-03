@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { requestAPI } from "../services/Api";
+import { requestAPI } from "../services/api";
 import { IRequest, RequestType, normalizeRequestType } from "../types";
 
 interface Props {
