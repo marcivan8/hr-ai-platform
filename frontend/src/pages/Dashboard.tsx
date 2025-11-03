@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { requestAPI } from '../services/api';
 import { IRequest } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
-import ChatInterface from '../components/chatInterface';
+import ChatInterface from '../components/ChatInterface';
 import { FileText, Clock, CheckCircle, AlertCircle, Plus } from 'lucide-react';
 
 export default function Dashboard() {
