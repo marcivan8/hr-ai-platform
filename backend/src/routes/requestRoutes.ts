@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { createRequest, getRequests, getRequestById, exportRequestPdf } from '../controllers/requestController';
-import { auth } from '../middleware/auth';
+import { ensureAuth } from '../middleware/auth';
 
 const router = Router();
 router.post("/", auth as any, createRequest as any);
