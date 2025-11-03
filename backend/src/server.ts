@@ -23,7 +23,7 @@ if (process.env.NODE_ENV === 'development') {
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://hr-ai-platform-db8jenlxl-marc-ivans-projects.vercel.app'
+  'http://hr-ai-platform-j49iu0vjl-marc-ivans-projects.vercel.app'
 ];
 
 app.use(cors({
