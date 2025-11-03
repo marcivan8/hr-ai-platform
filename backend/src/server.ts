@@ -12,6 +12,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Logger in development
 if (process.env.NODE_ENV === 'development') {
   app.use((req, _res, next) => {
     console.log(`${req.method} ${req.url}`);
@@ -19,8 +20,23 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-app.use(cors({ 
-  origin: config.corsOrigin,
+// CORS configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://hr-ai-platform-db8jenlxl-marc-ivans-projects.vercel.app'
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
