@@ -1,39 +1,41 @@
-import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import User from "../models/User";
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import config from '../config';
 
-// Étendre l'interface Request pour inclure "user"
-interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
+declare global { 
+  namespace Express { 
+    interface Request { 
+      user?: {
+        id: string;
+        role?: string;
+      };
+    } 
+  } 
 }
 
-export const auth = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "Token manquant" });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
-
-    // Récupérer l'utilisateur
-    const user = await User.findById(decoded.id).select("_id name email");
-    if (!user) {
-      return res.status(401).json({ error: "Utilisateur introuvable" });
-    }
-
-    req.user = {
-      id: user._id.toString(),
-      name: user.name,
-      email: user.email,
-    };
-
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: "Token invalide" });
+export function ensureAuth(req: Request, res: Response, next: NextFunction): void {
+  const auth = req.headers.authorization;
+  if (!auth) {
+    res.status(401).json({ error: 'Missing token' });
+    return;
   }
-};
+  const token = auth.replace('Bearer ', '');
+  try {
+    const payload = jwt.verify(token, config.jwtSecret) as any;
+    req.user = { id: payload.id, role: payload.role };
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+export function requireRole(roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const role = req.user?.role;
+    if (!roles.includes(role || '')) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    next();
+  };
+}

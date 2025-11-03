@@ -12,8 +12,8 @@ export async function register(req: Request, res: Response): Promise<Response> {
     const user = new User({ 
       email, 
       password: hashed, 
-      firstName: firstName || '',
-      lastName: lastName || name || '',
+      firstName: firstName || name?.split(' ')[0] || '',
+      lastName: lastName || name?.split(' ').slice(1).join(' ') || '',
       role 
     });
     await user.save();
@@ -30,7 +30,12 @@ export async function login(req: Request, res: Response): Promise<Response> {
   if (!user.password) return res.status(403).json({ error: 'No local login' });
   const match = await bcrypt.compare(password, user.password);
   if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+  
   const token = jwt.sign({ id: user._id, role: user.role }, config.jwtSecret, { expiresIn: '8h' });
+  
+  // Recharger l'utilisateur pour avoir accès aux virtuals
+  const userWithVirtuals = await User.findById(user._id);
+  
   return res.json({ 
     token, 
     user: { 
@@ -39,7 +44,7 @@ export async function login(req: Request, res: Response): Promise<Response> {
       role: user.role, 
       firstName: user.firstName,
       lastName: user.lastName,
-      name: `${user.firstName} ${user.lastName}`.trim()
+      name: userWithVirtuals?.name || `${user.firstName} ${user.lastName}`.trim()
     } 
   });
 }

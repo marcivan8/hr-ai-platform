@@ -6,6 +6,7 @@ export interface IUser extends Document {
   password: string;
   firstName: string;
   lastName: string;
+  name: string; // Virtual field
   role: 'employee' | 'hr' | 'admin';
   department?: string;
   position?: string;
@@ -26,7 +27,11 @@ const UserSchema = new Schema<IUser>({
   hireDate: Date,
   salary: { type: Number, select: false },
   isActive: { type: Boolean, default: true }
-}, { timestamps: true });
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
 
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
@@ -37,5 +42,10 @@ UserSchema.pre('save', async function(next) {
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
+
+// Virtual pour le nom complet
+UserSchema.virtual('name').get(function(this: IUser) {
+  return `${this.firstName} ${this.lastName}`.trim();
+});
 
 export default mongoose.model<IUser>('User', UserSchema);
