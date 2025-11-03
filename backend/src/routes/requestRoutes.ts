@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { createRequest, getRequests, getRequestById, exportRequestPdf } from '../controllers/requestController';
-import { ensureAuth } from '../middleware/auth';
+import { auth } from '../middleware/auth';
 
 const router = Router();
-router.post('/', ensureAuth, createRequest);
-router.get('/', ensureAuth, getRequests);
-router.get('/:id', ensureAuth, getRequestById);
-router.get('/:id/pdf', ensureAuth, exportRequestPdf);
+router.post("/", auth as any, createRequest as any);
+router.get("/", auth as any, getRequests as any);
+router.get("/:id", auth as any, getRequestById as any);
+router.get("/:id/pdf", auth as any, exportRequestPdf as any);
 
 export default router;
