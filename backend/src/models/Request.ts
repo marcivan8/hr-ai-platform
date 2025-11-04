@@ -21,10 +21,11 @@ export interface IRequest extends Document {
   status: RequestStatus;
   priority: 'low' | 'medium' | 'high' | 'urgent';
   conversationData?: {
-    messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>;
-    collectedData: Record<string, any>;
-    summary: string;
+    messages?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: Date }>;
+    collectedData?: Record<string, any>;
+    summary?: string;
   };
+  history?: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: Date }>;
   structuredData?: Record<string, any>;
   hrNotes?: string;
   reviewedBy?: mongoose.Types.ObjectId;
@@ -88,6 +89,13 @@ const RequestSchema = new Schema<IRequest>(
       collectedData: Schema.Types.Mixed,
       summary: String,
     },
+    history: [
+      {
+        role: { type: String, enum: ['user', 'assistant'] },
+        content: String,
+        timestamp: { type: Date, default: Date.now },
+      },
+    ],
     structuredData: Schema.Types.Mixed,
     hrNotes: String,
     reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
@@ -117,6 +125,5 @@ RequestSchema.index({ employeeId: 1, createdAt: -1 });
 RequestSchema.index({ status: 1, priority: -1 });
 RequestSchema.index({ requestType: 1 });
 
-// ✅ Export both the interface and the model correctly
 const RequestModel = mongoose.model<IRequest>('Request', RequestSchema);
 export default RequestModel;

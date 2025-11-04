@@ -1,4 +1,3 @@
-// src/controllers/requestController.ts
 import { Request, Response } from 'express';
 import RequestModel, { IRequest } from '../models/Request';
 import { generateAIResponse, extractStructuredData, IMessage } from '../services/aiService';
@@ -7,24 +6,19 @@ import fs from 'fs';
 import { generatePDF } from '../services/pdfService';
 import mongoose from 'mongoose';
 
-function ensureConversation(reqDoc: Partial<IRequest>) {
-  // support both conversationData.messages and legacy history
-  if (!reqDoc.history) (reqDoc as any).history = [];
-  if (!reqDoc.conversationData) (reqDoc as any).conversationData = { messages: [], collectedData: {}, summary: '' };
-  if (!Array.isArray((reqDoc as any).conversationData.messages)) (reqDoc as any).conversationData.messages = [];
+function ensureConversation(reqDoc: IRequest) {
+  if (!reqDoc.history) reqDoc.history = [];
+  if (!reqDoc.conversationData) reqDoc.conversationData = { messages: [], collectedData: {}, summary: '' };
+  if (!Array.isArray(reqDoc.conversationData.messages)) reqDoc.conversationData.messages = [];
 }
 
 /**
  * Create request (draft)
- * POST /api/requests/create
- * body: { employeeId, title, description, requestType?, priority? }
  */
 export async function createRequest(req: Request, res: Response) {
   try {
     const { employeeId, title, description, requestType, priority } = req.body;
-    if (!employeeId || !title || !description) {
-      return res.status(400).json({ error: 'Missing fields' });
-    }
+    if (!employeeId || !title || !description) return res.status(400).json({ error: 'Missing fields' });
 
     const newRequest = new RequestModel({
       employeeId,
@@ -37,10 +31,9 @@ export async function createRequest(req: Request, res: Response) {
       conversationData: { messages: [], collectedData: {}, summary: '' }
     });
 
-    // initial user message saved into history for AI context
     const initialMsg: IMessage = { role: 'user', content: description, timestamp: new Date() };
-    newRequest.history.push(initialMsg as any);
-    newRequest.conversationData!.messages.push(initialMsg as any);
+    newRequest.history.push(initialMsg);
+    newRequest.conversationData.messages.push(initialMsg);
 
     await newRequest.save();
     return res.status(201).json({ ok: true, request: newRequest });
@@ -52,8 +45,6 @@ export async function createRequest(req: Request, res: Response) {
 
 /**
  * Interact with AI
- * POST /api/requests/interact/:requestId
- * body: { message: string }
  */
 export async function interact(req: Request, res: Response) {
   try {
@@ -68,43 +59,36 @@ export async function interact(req: Request, res: Response) {
 
     ensureConversation(reqDoc);
 
-    // Push user message
     const userMsg: IMessage = { role: 'user', content: message, timestamp: new Date() };
-    (reqDoc as any).history.push(userMsg);
-    (reqDoc as any).conversationData.messages.push(userMsg);
+    reqDoc.history.push(userMsg);
+    reqDoc.conversationData.messages.push(userMsg);
 
-    // Prepare history to pass to AI (use history array for context)
-    const historyForAi: IMessage[] = ((reqDoc as any).history || []).map((m: any) => ({
-      role: m.role,
-      content: m.content,
-      timestamp: m.timestamp
-    }));
+    // AI context
+    const historyForAi = reqDoc.history.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
 
-    // Generate AI reply
     const { reply, structured } = await generateAIResponse(message, historyForAi);
 
     const assistantMsg: IMessage = { role: 'assistant', content: reply, timestamp: new Date() };
-    (reqDoc as any).history.push(assistantMsg);
-    (reqDoc as any).conversationData.messages.push(assistantMsg);
+    reqDoc.history.push(assistantMsg);
+    reqDoc.conversationData.messages.push(assistantMsg);
 
-    // Merge structured into conversationData.collectedData if present
+    // Merge structured data
     if (structured && typeof structured === 'object') {
-      (reqDoc as any).conversationData.collectedData = {
-        ...((reqDoc as any).conversationData.collectedData || {}),
+      reqDoc.conversationData.collectedData = {
+        ...reqDoc.conversationData.collectedData,
         ...structured
       };
     } else {
-      // best-effort attempt to re-extract structured data from updated history
       try {
-        const reExtract = await extractStructuredData(historyForAi.concat({ role: 'user', content: message }));
+        const reExtract = await extractStructuredData([...historyForAi, { role: 'user', content: message }]);
         if (reExtract && typeof reExtract === 'object') {
-          (reqDoc as any).conversationData.collectedData = {
-            ...((reqDoc as any).conversationData.collectedData || {}),
+          reqDoc.conversationData.collectedData = {
+            ...reqDoc.conversationData.collectedData,
             ...reExtract
           };
         }
       } catch (e) {
-        // ignore extraction errors
+        // ignore
       }
     }
 
@@ -118,8 +102,7 @@ export async function interact(req: Request, res: Response) {
 }
 
 /**
- * Submit request: mark as submitted, generate PDF and store url
- * POST /api/requests/submit/:requestId
+ * Submit request
  */
 export async function submitRequest(req: Request, res: Response) {
   try {
@@ -132,14 +115,13 @@ export async function submitRequest(req: Request, res: Response) {
     reqDoc.status = 'submitted';
     await reqDoc.save();
 
-    // Ensure uploads dir
     const uploadsDir = path.join(process.cwd(), 'uploads');
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
     const filename = `request-${reqDoc._id}.pdf`;
     const outPath = path.join(uploadsDir, filename);
 
-    const employeeName = (reqDoc as any).employeeId?.name || (reqDoc as any).employeeId?.email || 'Confidentiel';
+    const employeeName = (reqDoc.employeeId as any)?.name || (reqDoc.employeeId as any)?.email || 'Confidentiel';
     await generatePDF({ ...reqDoc.toObject(), employeeName }, outPath);
 
     reqDoc.pdfReportUrl = `/uploads/${filename}`;
@@ -153,8 +135,7 @@ export async function submitRequest(req: Request, res: Response) {
 }
 
 /**
- * Get a request by id
- * GET /api/requests/:requestId
+ * Get request by ID
  */
 export async function getRequestById(req: Request, res: Response) {
   try {
@@ -173,7 +154,6 @@ export async function getRequestById(req: Request, res: Response) {
 
 /**
  * List requests
- * GET /api/requests/
  */
 export async function listRequests(_req: Request, res: Response) {
   try {
