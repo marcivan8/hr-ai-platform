@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import RequestModel, { IRequest } from '../models/Request';
-import { generateAIResponse, extractStructuredData, IMessage } from '../services/aiService';
+import RequestModel from '../models/Request';
+import { generateAIResponse } from '../services/aiService';
 import mongoose from 'mongoose';
 import { generatePDF } from '../services/pdfService';
 import path from 'path';
@@ -27,10 +27,10 @@ export async function createRequest(req: Request, res: Response) {
       conversationData: { messages: [], collectedData: {}, summary: '' }
     });
 
-    const initialMsg: IMessage = { 
-      role: 'user', 
-      content: description, 
-      timestamp: new Date() 
+    const initialMsg = {
+      role: 'user' as const,
+      content: description,
+      timestamp: new Date()
     };
     
     // Ensure arrays exist before pushing
@@ -42,8 +42,8 @@ export async function createRequest(req: Request, res: Response) {
       newRequest.conversationData.messages = [];
     }
     
-    newRequest.history.push(initialMsg);
-    newRequest.conversationData.messages.push(initialMsg);
+  newRequest.history.push(initialMsg);
+  newRequest.conversationData.messages.push(initialMsg);
 
     await newRequest.save();
     return res.status(201).json({ ok: true, request: newRequest });
@@ -80,20 +80,34 @@ export async function interact(req: Request, res: Response) {
       reqDoc.conversationData.messages = [];
     }
 
-    const conversationData = reqDoc.conversationData;
-    const history = reqDoc.history;
+    // At this point we've ensured both exist above; narrow types for TS
+    if (!reqDoc.conversationData) {
+      reqDoc.conversationData = { messages: [], collectedData: {}, summary: '' };
+    }
+    if (!reqDoc.history) {
+      reqDoc.history = [];
+    }
+
+    const conversationData = reqDoc.conversationData as {
+      messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: Date }>;
+      collectedData?: Record<string, any>;
+      summary?: string;
+    };
+    conversationData.messages = conversationData.messages || [];
+
+    const history = reqDoc.history as Array<{ role: 'user' | 'assistant'; content: string; timestamp?: Date }>;
 
     // Push user message - filter out 'system' role for storage
-    const userMsg: IMessage = { 
-      role: 'user', 
-      content: message, 
-      timestamp: new Date() 
+    const userMsg = {
+      role: 'user' as const,
+      content: message,
+      timestamp: new Date()
     };
     history.push(userMsg);
     conversationData.messages.push(userMsg);
 
     // Prepare history for AI context - only user/assistant messages
-    const historyForAi: IMessage[] = history
+    const historyForAi = history
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({
         role: m.role as 'user' | 'assistant',
@@ -104,10 +118,10 @@ export async function interact(req: Request, res: Response) {
     // Generate AI reply
     const { reply, structured } = await generateAIResponse(message, historyForAi);
 
-    const assistantMsg: IMessage = { 
-      role: 'assistant', 
-      content: reply, 
-      timestamp: new Date() 
+    const assistantMsg = {
+      role: 'assistant' as const,
+      content: reply,
+      timestamp: new Date()
     };
     history.push(assistantMsg);
     conversationData.messages.push(assistantMsg);
