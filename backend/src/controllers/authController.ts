@@ -38,6 +38,7 @@ export async function register(req: Request, res: Response): Promise<Response> {
       }
     });
   } catch (err: any) {
+    console.error("🔴 Auth error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
@@ -77,6 +78,7 @@ export async function login(req: Request, res: Response): Promise<Response> {
     });
 
   } catch (err: any) {
+    console.error("🔴 Auth error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
