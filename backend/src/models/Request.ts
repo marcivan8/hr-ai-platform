@@ -117,6 +117,6 @@ RequestSchema.index({ employeeId: 1, createdAt: -1 });
 RequestSchema.index({ status: 1, priority: -1 });
 RequestSchema.index({ requestType: 1 });
 
-// ✅ Export both the interface and the model
-export { IRequest };
-export default mongoose.model<IRequest>('Request', RequestSchema);
+// ✅ Export both the interface and the model correctly
+const RequestModel = mongoose.model<IRequest>('Request', RequestSchema);
+export default RequestModel;
