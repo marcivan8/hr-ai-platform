@@ -11,7 +11,9 @@ import fs from 'fs';
  */
 export async function createRequest(req: Request, res: Response) {
   try {
-    const { employeeId, title, description, requestType, priority, type } = req.body;
+    const { employeeId: bodyEmployeeId, title, description, requestType, priority, type } = req.body;
+    // Prefer employeeId from body, fall back to authenticated user if available
+    const employeeId = bodyEmployeeId || (req as any).user?.id;
     if (!employeeId || !title || !description) {
       return res.status(400).json({ error: 'Missing fields' });
     }

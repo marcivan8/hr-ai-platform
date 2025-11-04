@@ -129,6 +129,34 @@ export const requestAPI = {
     api.get(`/requests/${requestId}/pdf`, { responseType: 'blob' })
 };
 
+// Helper for creating a request when you have an employeeId available
+export interface IRequestPayload {
+  employeeId: string;       // MongoDB ObjectId string
+  title: string;
+  description: string;
+  requestType?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+}
+
+export async function createRequest(payload: IRequestPayload) {
+  // Key points:
+  // 1. employeeId cannot be null or undefined — your backend requires it.
+  // 2. title and description are mandatory.
+  // 3. Optional: requestType and priority.
+  // 4. We post to '/requests/create' (baseURL already includes '/api'), so ensure VITE_API_URL is correct.
+  if (!payload.employeeId || !payload.title || !payload.description) {
+    throw new Error('Missing required fields: employeeId, title, or description');
+  }
+
+  try {
+    const response = await api.post('/requests/create', payload);
+    return response.data;
+  } catch (err: any) {
+    console.error('API Error:', err.response || err);
+    throw err;
+  }
+}
+
 // API du dashboard RH
 export const hrAPI = {
   getStats: () => api.get<{
