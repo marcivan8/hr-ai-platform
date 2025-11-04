@@ -36,18 +36,21 @@ export const askFollowUp = async (req: Request, res: Response): Promise<Response
   }
 
   try {
-    const requestDoc = await RequestModel.findById(requestId);
+    // Use generic type to tell Mongoose what type we expect
+    const requestDoc = await RequestModel.findById<IRequest>(requestId);
+
     if (!requestDoc) return res.status(404).json({ error: "Request not found" });
 
-    // AI conversation history
-    const history = requestDoc.history || [];
+    // Initialize history if undefined
+    if (!requestDoc.history) requestDoc.history = [];
 
     // Generate AI response
-    const aiReply = await generateAIResponse(userMessage, history);
+    const aiReply = await generateAIResponse(userMessage, requestDoc.history);
 
     // Save AI response to request history
     requestDoc.history.push({ role: "user", content: userMessage });
     requestDoc.history.push({ role: "ai", content: aiReply });
+
     await requestDoc.save();
 
     return res.json({ ok: true, aiReply });
