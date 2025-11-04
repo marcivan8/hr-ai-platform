@@ -1,15 +1,13 @@
-import { Router } from "express";
-import * as requestController from "../controllers/requestController";
+// src/routes/requestRoutes.ts
+import { Router } from 'express';
+import * as ctrl from '../controllers/requestController';
 
 const router = Router();
 
-// Create a new request
-router.post("/create", requestController.createRequest);
-
-// AI follow-up conversation
-router.post("/ask", requestController.askFollowUp);
-
-// PDF generation placeholder
-router.post("/generate-pdf", requestController.generatePDF);
+router.post('/create', ctrl.createRequest); // create draft request
+router.post('/interact/:requestId', ctrl.interact); // user message -> AI reply
+router.post('/submit/:requestId', ctrl.submitRequest); // finalize + generate PDF
+router.get('/:requestId', ctrl.getRequestById);
+router.get('/', ctrl.listRequests);
 
 export default router;

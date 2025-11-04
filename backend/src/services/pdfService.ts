@@ -1,109 +1,56 @@
+// src/services/pdfService.ts
 import PDFDocument from 'pdfkit';
-import { IRequest } from '../models/Request';
 import fs from 'fs';
+import { IRequest } from '../models/Request';
 
-export function generatePDF(
-  request: Partial<IRequest> & { employeeName?: string },
-  outPath: string
-): Promise<void> {
+export async function generatePDF(request: Partial<IRequest> & { employeeName?: string }, outPath: string) {
   return new Promise<void>((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({ margin: 40 });
-      const stream = fs.createWriteStream(outPath);
+    const doc = new PDFDocument({ margin: 40 });
+    const stream = fs.createWriteStream(outPath);
+    doc.pipe(stream);
 
-      doc.pipe(stream);
+    doc.fontSize(18).text('Dossier RH — Demande', { align: 'center' });
+    doc.moveDown();
 
-      // Header
-      doc
-        .fontSize(18)
-        .font('Helvetica-Bold')
-        .text('Dossier RH — Demande', { align: 'center' });
-      
-      doc.moveDown(1.5);
+    doc.fontSize(12).text(`Titre: ${request.title || ''}`);
+    doc.text(`Type: ${request.requestType || request.type || ''}`);
+    doc.text(`Employé: ${request.employeeName || 'Confidentiel'}`);
+    doc.text(`Statut: ${request.status || ''}`);
+    doc.moveDown();
 
-      // Request details
-      doc.fontSize(12).font('Helvetica-Bold').text('Informations générales');
-      doc.fontSize(10).font('Helvetica');
-      
-      doc.text(`Titre: ${request.title || 'Non spécifié'}`, { indent: 20 });
-      doc.text(`Type: ${request.type || request.requestType || 'Non spécifié'}`, { indent: 20 });
-      doc.text(`Statut: ${request.status || 'Non spécifié'}`, { indent: 20 });
-      doc.text(`Priorité: ${request.priority || 'Non spécifiée'}`, { indent: 20 });
-      doc.text(`Employé: ${request.employeeName || 'Confidentiel'}`, { indent: 20 });
-      
+    doc.fontSize(12).text('Description:');
+    doc.fontSize(10).text(request.description || '', { lineGap: 4 });
+    doc.moveDown();
+
+    if (request.aiSummary) {
+      doc.fontSize(12).text('Résumé IA:');
+      doc.fontSize(10).text(request.aiSummary);
       doc.moveDown();
-
-      // Description
-      if (request.description) {
-        doc.fontSize(12).font('Helvetica-Bold').text('Description:');
-        doc.fontSize(10).font('Helvetica').text(request.description, { 
-          lineGap: 4,
-          indent: 20,
-          align: 'justify'
-        });
-        doc.moveDown();
-      }
-
-      // AI Summary
-      if (request.aiSummary) {
-        doc.fontSize(12).font('Helvetica-Bold').text('Résumé IA:');
-        doc.fontSize(10).font('Helvetica').text(request.aiSummary, {
-          lineGap: 4,
-          indent: 20,
-          align: 'justify'
-        });
-        doc.moveDown();
-      }
-
-      // Scenarios
-      if (Array.isArray(request.aiScenarios) && request.aiScenarios.length > 0) {
-        doc.fontSize(12).font('Helvetica-Bold').text('Scénarios proposés:');
-        doc.fontSize(10).font('Helvetica');
-        
-        request.aiScenarios.forEach((scenario: any, index: number) => {
-          const description = scenario.description || 
-                            (typeof scenario === 'string' ? scenario : JSON.stringify(scenario));
-          doc.text(`${index + 1}. ${description}`, { 
-            indent: 20,
-            lineGap: 3
-          });
-        });
-        doc.moveDown();
-      }
-
-      // HR Notes
-      if (request.hrNotes) {
-        doc.fontSize(12).font('Helvetica-Bold').text('Notes RH:');
-        doc.fontSize(10).font('Helvetica').text(request.hrNotes, {
-          lineGap: 4,
-          indent: 20,
-          align: 'justify'
-        });
-        doc.moveDown();
-      }
-
-      // Footer
-      doc.moveDown(2);
-      doc.fontSize(8).font('Helvetica').text(
-        `Document généré le ${new Date().toLocaleDateString('fr-FR')}`,
-        { align: 'center' }
-      );
-
-      doc.end();
-
-      stream.on('finish', () => {
-        console.log(`✅ PDF generated successfully: ${outPath}`);
-        resolve();
-      });
-
-      stream.on('error', (error) => {
-        console.error('❌ PDF generation error:', error);
-        reject(error);
-      });
-
-    } catch (error) {
-      console.error('❌ PDF generation error:', error);
-      reject(error);
     }
+
+    if ((request.aiScenarios || []).length) {
+      doc.fontSize(12).text('Scénarios proposés:');
+      (request.aiScenarios || []).forEach((s: any, i: number) => {
+        doc.fontSize(10).text(`${i + 1}. ${s.description || JSON.stringify(s)}`);
+      });
+      doc.moveDown();
+    }
+
+    // conversation snapshot
+    const conv = (request.conversationData?.messages || request.history || []).slice(-20);
+    if (conv.length) {
+      doc.fontSize(12).text('Conversation (dernier échanges):');
+      doc.fontSize(10);
+      conv.forEach((m: any) => {
+        const who = m.role === 'assistant' ? 'Assistant' : 'Employé';
+        const time = m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR') : '';
+        doc.text(`${who} [${time}]: ${m.content}`, { lineGap: 3 });
+      });
+      doc.moveDown();
+    }
+
+    doc.end();
+    stream.on('finish', () => resolve());
+    stream.on('error', reject);
   });
 }

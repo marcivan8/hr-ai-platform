@@ -1,89 +1,150 @@
-import { Request, Response } from "express";
-import RequestModel, { IRequest } from "../models/Request";
-import { generateAIResponse } from "../services/aiService"; // your AI function
+// src/controllers/requestController.ts
+import { Request, Response } from 'express';
+import RequestModel, { IRequest } from '../models/Request';
+import { generateAIResponse, IMessage } from '../services/aiService';
+import path from 'path';
+import fs from 'fs';
+import { generatePDF } from '../services/pdfService';
+import mongoose from 'mongoose';
 
-// Create a new request
-export const createRequest = async (req: Request, res: Response): Promise<Response> => {
-  const { title, description, employeeId } = req.body;
-
-  if (!title || !description || !employeeId) {
-    return res.status(400).json({ error: "Missing required fields" });
+function ensureConversation(reqDoc: IRequest) {
+  if (!reqDoc.history) reqDoc.history = [];
+  if (!reqDoc.conversationData) {
+    reqDoc.conversationData = { messages: [], collectedData: {}, summary: '' } as any;
   }
+}
 
+// Create a new request (draft)
+export async function createRequest(req: Request, res: Response) {
   try {
-    const newRequest: IRequest = new RequestModel({
+    const { employeeId, title, description, requestType, type, priority } = req.body;
+    if (!employeeId || !title || !description) {
+      return res.status(400).json({ error: 'Missing fields' });
+    }
+
+    const newRequest = new RequestModel({
+      employeeId,
       title,
       description,
-      employeeId,
-      conversationData: { messages: [], collectedData: {}, summary: "" },
-      status: "draft",
-      priority: "medium",
-      isAnonymous: false,
-      consentGiven: true
+      requestType: requestType || type || 'general_inquiry',
+      status: 'draft',
+      priority: priority || 'medium',
+      history: [],
+      conversationData: { messages: [], collectedData: {}, summary: '' }
     });
 
     await newRequest.save();
 
-    return res.json({ ok: true, request: newRequest });
+    // option: add initial user message into history (helps AI context)
+    newRequest.history.push({ role: 'user', content: description, timestamp: new Date() } as any);
+    await newRequest.save();
+
+    return res.status(201).json({ ok: true, request: newRequest });
   } catch (err: any) {
-    console.error("❌ createRequest error:", err);
-    return res.status(500).json({ error: err.message });
+    console.error('createRequest error:', err);
+    return res.status(500).json({ error: err.message || 'Internal error' });
   }
-};
+}
 
-// Ask follow-up questions (AI)
-export const askFollowUp = async (req: Request, res: Response): Promise<Response> => {
-  const { requestId, userMessage } = req.body;
-
-  if (!requestId || !userMessage) {
-    return res.status(400).json({ error: "Missing requestId or userMessage" });
-  }
-
+// Interact: user sends message -> AI reply returned and stored
+export async function interact(req: Request, res: Response) {
   try {
-    const requestDoc = await RequestModel.findById<IRequest>(requestId);
+    const { requestId } = req.params;
+    const { message } = req.body;
 
-    if (!requestDoc) return res.status(404).json({ error: "Request not found" });
+    if (!message) return res.status(400).json({ error: 'Missing message' });
+    if (!mongoose.Types.ObjectId.isValid(requestId)) return res.status(400).json({ error: 'Invalid id' });
 
-    // Ensure conversation container exists
-    if (!requestDoc.conversationData) {
-      requestDoc.conversationData = { messages: [], collectedData: {}, summary: "" };
+    const reqDoc = await RequestModel.findById(requestId);
+    if (!reqDoc) return res.status(404).json({ error: 'Request not found' });
+
+    ensureConversation(reqDoc);
+
+    // add user message
+    const userMsg: IMessage = { role: 'user', content: message, timestamp: new Date() };
+    reqDoc.history.push(userMsg);
+    reqDoc.conversationData!.messages.push(userMsg as any);
+
+    // call AI
+    const { reply, structured } = await generateAIResponse(message, reqDoc.history as any);
+
+    // store assistant reply
+    const assistantMsg: IMessage = { role: 'assistant', content: reply, timestamp: new Date() };
+    reqDoc.history.push(assistantMsg);
+    reqDoc.conversationData!.messages.push(assistantMsg as any);
+
+    // merge structured extraction into collectedData
+    if (structured && typeof structured === 'object') {
+      reqDoc.conversationData!.collectedData = {
+        ...(reqDoc.conversationData!.collectedData || {}),
+        ...structured
+      };
     }
 
-    // Prepare message history for AI call
-    const messages = (requestDoc.conversationData.messages || []).map(msg => ({
-      role: msg.role, 
-      content: msg.content,
-    }));
+    await reqDoc.save();
 
-    // Add latest user message
-    messages.push({ role: "user", content: userMessage });
-
-    // Get AI response
-    const aiReply = await generateAIResponse(userMessage, messages);
-
-    // Save conversation to DB
-    requestDoc.conversationData.messages.push({
-      role: "user",
-      content: userMessage,
-      timestamp: new Date(),
-    });
-
-    requestDoc.conversationData.messages.push({
-      role: "assistant",
-      content: aiReply,
-      timestamp: new Date(),
-    });
-
-    await requestDoc.save();
-
-    return res.json({ ok: true, aiReply });
+    return res.json({ ok: true, aiReply: reply, structured: structured || {} });
   } catch (err: any) {
-    console.error("❌ askFollowUp error:", err);
-    return res.status(500).json({ error: err.message });
+    console.error('interact error:', err);
+    return res.status(500).json({ error: err.message || 'Internal error' });
   }
-};
+}
 
-// Placeholder for future PDF generation
-export const generatePDF = async (_req: Request, res: Response): Promise<Response> => {
-  return res.status(501).json({ error: "PDF generation not implemented yet" });
-};
+// Submit request: mark submitted and generate PDF
+export async function submitRequest(req: Request, res: Response) {
+  try {
+    const { requestId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(requestId)) return res.status(400).json({ error: 'Invalid id' });
+
+    const reqDoc = await RequestModel.findById(requestId).populate('employeeId', 'firstName lastName email');
+    if (!reqDoc) return res.status(404).json({ error: 'Request not found' });
+
+    reqDoc.status = 'submitted';
+    await reqDoc.save();
+
+    // generate PDF (sync)
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const filename = `request-${reqDoc._id}.pdf`;
+    const outPath = path.join(uploadsDir, filename);
+
+    const employeeName = (reqDoc as any).employeeId?.name || (reqDoc as any).employeeId?.email || 'Confidentiel';
+    await generatePDF({ ...reqDoc.toObject(), employeeName }, outPath);
+
+    reqDoc.pdfReportUrl = `/uploads/${filename}`;
+    await reqDoc.save();
+
+    return res.json({ ok: true, request: reqDoc, pdfUrl: reqDoc.pdfReportUrl });
+  } catch (err: any) {
+    console.error('submitRequest error:', err);
+    return res.status(500).json({ error: err.message || 'Internal error' });
+  }
+}
+
+// Get request by id
+export async function getRequestById(req: Request, res: Response) {
+  try {
+    const { requestId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(requestId)) return res.status(400).json({ error: 'Invalid id' });
+
+    const reqDoc = await RequestModel.findById(requestId).populate('employeeId', 'firstName lastName email');
+    if (!reqDoc) return res.status(404).json({ error: 'Not found' });
+    return res.json(reqDoc);
+  } catch (err: any) {
+    console.error('getRequestById error:', err);
+    return res.status(500).json({ error: err.message || 'Internal error' });
+  }
+}
+
+// list requests (HR or employee)
+export async function listRequests(req: Request, res: Response) {
+  try {
+    // you can use req.user.role check if you have auth middleware
+    const all = await RequestModel.find().sort({ createdAt: -1 }).populate('employeeId', 'firstName lastName email');
+    return res.json(all);
+  } catch (err: any) {
+    console.error('listRequests error:', err);
+    return res.status(500).json({ error: err.message || 'Internal error' });
+  }
+}
