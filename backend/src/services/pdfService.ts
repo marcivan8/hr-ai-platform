@@ -36,18 +36,26 @@ export async function generatePDF(request: Partial<IRequest> & { employeeName?: 
       doc.moveDown();
     }
 
-    // conversation snapshot
-    const conv = (request.conversationData?.messages || request.history || []).slice(-20);
-    if (conv.length) {
-      doc.fontSize(12).text('Conversation (dernier échanges):');
-      doc.fontSize(10);
-      conv.forEach((m: any) => {
-        const who = m.role === 'assistant' ? 'Assistant' : 'Employé';
-        const time = m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR') : '';
-        doc.text(`${who} [${time}]: ${m.content}`, { lineGap: 3 });
-      });
-      doc.moveDown();
-    }
+    // Get last 20 conversation messages (support old .history and new conversationData.messages)
+const conv =
+  request.conversationData?.messages ||
+  (request as any).history ||
+  [];
+
+const recentConv = conv.slice(-20);
+
+if (recentConv.length) {
+  doc.fontSize(12).text('Conversation (derniers échanges):');
+  doc.fontSize(10);
+
+  recentConv.forEach((m: any) => {
+    const who = m.role === 'assistant' ? 'Assistant' : 'Employé';
+    const time = m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR') : '';
+    doc.text(`${who} [${time}]: ${m.content}`, { lineGap: 3 });
+  });
+
+  doc.moveDown();
+}
 
     doc.end();
     stream.on('finish', () => resolve());

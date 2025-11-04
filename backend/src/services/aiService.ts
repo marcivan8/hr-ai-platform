@@ -47,12 +47,12 @@ export async function generateAIResponse(userPrompt: string, history: IMessage[]
       return { reply: fallback, structured: {} };
     }
 
-    const resp: any = await openAiClient.chat.completions.create({
-      model: 'gpt-4o-mini', // adapt to available model in your account
-      messages: openaiMessages,
-      temperature: 0.2,
-      max_tokens: 800
-    });
+  const resp: any = await openAiClient.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: openaiMessages as any[], // ✅ bypass strict type union
+    temperature: 0.2,
+    max_tokens: 800
+});
 
     const reply: string = resp?.choices?.[0]?.message?.content ?? '';
 
@@ -93,12 +93,12 @@ export async function extractStructuredData(history: IMessage[]) {
       ...history.map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content }))
     ];
 
-    const resp: any = await openAiClient.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages,
-      temperature: 0,
-      max_tokens: 400
-    });
+  const resp: any = await openAiClient.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: messages as any[],
+    temperature: 0,
+    max_tokens: 400
+});
 
     const raw: string = resp?.choices?.[0]?.message?.content ?? '';
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
