@@ -45,6 +45,8 @@ export async function createRequest(req: Request, res: Response) {
 
 /**
  * Interact with AI
+ * POST /api/requests/interact/:requestId
+ * body: { message: string }
  */
 export async function interact(req: Request, res: Response) {
   try {
@@ -57,97 +59,60 @@ export async function interact(req: Request, res: Response) {
     const reqDoc = await RequestModel.findById(requestId);
     if (!reqDoc) return res.status(404).json({ error: 'Request not found' });
 
-    ensureConversation(reqDoc);
+    // Ensure conversationData and history exist
+    if (!reqDoc.history) reqDoc.history = [];
+    if (!reqDoc.conversationData) reqDoc.conversationData = { messages: [], collectedData: {}, summary: '' };
+    if (!Array.isArray(reqDoc.conversationData.messages)) reqDoc.conversationData.messages = [];
 
+    const conversationData = reqDoc.conversationData;
+    const history = reqDoc.history;
+
+    // Push user message
     const userMsg: IMessage = { role: 'user', content: message, timestamp: new Date() };
-    reqDoc.history.push(userMsg);
-    reqDoc.conversationData.messages.push(userMsg);
+    history.push(userMsg);
+    conversationData.messages.push(userMsg);
 
-    // AI context
-    const historyForAi = reqDoc.history.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
+    // Prepare history for AI context
+    const historyForAi: IMessage[] = history.map(m => ({
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp
+    }));
 
+    // Generate AI reply
     const { reply, structured } = await generateAIResponse(message, historyForAi);
 
     const assistantMsg: IMessage = { role: 'assistant', content: reply, timestamp: new Date() };
-    reqDoc.history.push(assistantMsg);
-    reqDoc.conversationData.messages.push(assistantMsg);
+    history.push(assistantMsg);
+    conversationData.messages.push(assistantMsg);
 
-    // Merge structured data
+    // Merge structured data if available
     if (structured && typeof structured === 'object') {
-      reqDoc.conversationData.collectedData = {
-        ...reqDoc.conversationData.collectedData,
+      conversationData.collectedData = {
+        ...conversationData.collectedData,
         ...structured
       };
     } else {
+      // fallback: try to re-extract structured data from updated history
       try {
-        const reExtract = await extractStructuredData([...historyForAi, { role: 'user', content: message }]);
+        const reExtract = await extractStructuredData([...history, { role: 'user', content: message, timestamp: new Date() }]);
         if (reExtract && typeof reExtract === 'object') {
-          reqDoc.conversationData.collectedData = {
-            ...reqDoc.conversationData.collectedData,
+          conversationData.collectedData = {
+            ...conversationData.collectedData,
             ...reExtract
           };
         }
       } catch (e) {
-        // ignore
+        console.warn('Structured data re-extraction failed:', e);
       }
     }
 
+    // Save updated document
     await reqDoc.save();
 
     return res.json({ ok: true, aiReply: reply, structured: structured || {} });
   } catch (err: any) {
     console.error('interact error:', err);
-    return res.status(500).json({ error: err.message || 'Internal error' });
-  }
-}
-
-/**
- * Submit request
- */
-export async function submitRequest(req: Request, res: Response) {
-  try {
-    const { requestId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(requestId)) return res.status(400).json({ error: 'Invalid id' });
-
-    const reqDoc = await RequestModel.findById(requestId).populate('employeeId', 'firstName lastName email');
-    if (!reqDoc) return res.status(404).json({ error: 'Request not found' });
-
-    reqDoc.status = 'submitted';
-    await reqDoc.save();
-
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-    const filename = `request-${reqDoc._id}.pdf`;
-    const outPath = path.join(uploadsDir, filename);
-
-    const employeeName = (reqDoc.employeeId as any)?.name || (reqDoc.employeeId as any)?.email || 'Confidentiel';
-    await generatePDF({ ...reqDoc.toObject(), employeeName }, outPath);
-
-    reqDoc.pdfReportUrl = `/uploads/${filename}`;
-    await reqDoc.save();
-
-    return res.json({ ok: true, request: reqDoc, pdfUrl: reqDoc.pdfReportUrl });
-  } catch (err: any) {
-    console.error('submitRequest error:', err);
-    return res.status(500).json({ error: err.message || 'Internal error' });
-  }
-}
-
-/**
- * Get request by ID
- */
-export async function getRequestById(req: Request, res: Response) {
-  try {
-    const { requestId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(requestId)) return res.status(400).json({ error: 'Invalid id' });
-
-    const reqDoc = await RequestModel.findById(requestId).populate('employeeId', 'firstName lastName email');
-    if (!reqDoc) return res.status(404).json({ error: 'Not found' });
-
-    return res.json(reqDoc);
-  } catch (err: any) {
-    console.error('getRequestById error:', err);
     return res.status(500).json({ error: err.message || 'Internal error' });
   }
 }
