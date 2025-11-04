@@ -90,11 +90,15 @@ export default function ChatInterface({ initialRequest, onSaved }: Props) {
       setIsConversationMode(true);
 
     } catch (error: any) {
-      console.error('Error creating request:', error);
-      const errorMessage = error?.response?.data?.error || 
-                          error?.response?.data?.message ||
-                          "❌ Une erreur est survenue lors de l'envoi.";
-      alert(errorMessage);
+        // Improved error extraction for clearer debugging
+        console.error('Error creating request:', error);
+        const status = error?.response?.status;
+        const url = error?.config?.url;
+        const respData = error?.response?.data;
+        const respText = typeof respData === 'string' ? respData : (respData && typeof respData === 'object' ? JSON.stringify(respData) : null);
+        const fallbackMsg = `❌ Une erreur est survenue lors de l'envoi.${status ? ` (status ${status})` : ''}`;
+        const errorMessage = (respData && (respData.error || respData.message)) || respText || error?.message || fallbackMsg;
+        alert(`Erreur: ${errorMessage}\nURL: ${url || 'unknown'}\nStatus: ${status || 'unknown'}`);
     } finally {
       setLoading(false);
     }
@@ -123,15 +127,19 @@ export default function ChatInterface({ initialRequest, onSaved }: Props) {
       }
 
     } catch (error: any) {
-      console.error('Error sending message:', error);
-      const errorMsg = error?.response?.data?.error || "Erreur de communication avec l'IA";
-      
-      const errorMessage: Message = {
-        role: "assistant",
-        content: `❌ ${errorMsg}`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errorMessage]);
+        console.error('Error sending message:', error);
+        const status = error?.response?.status;
+        const url = error?.config?.url;
+        const respData = error?.response?.data;
+        const respText = typeof respData === 'string' ? respData : (respData && typeof respData === 'object' ? JSON.stringify(respData) : null);
+        const errorMsg = (respData && (respData.error || respData.message)) || respText || error?.message || 'Erreur de communication avec l\'IA';
+
+        const errorMessage: Message = {
+          role: "assistant",
+          content: `❌ ${errorMsg} (url: ${url || 'unknown'}, status: ${status || 'unknown'})`,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMessage]);
     }
   }
 
