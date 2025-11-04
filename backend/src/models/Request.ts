@@ -1,126 +1,122 @@
-import { Request, Response } from 'express';
-import RequestModel, { IRequest } from '../models/Request';
-import { generateAIResponse } from '../services/aiService'; // Your AI helper
-import mongoose from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 
-/**
- * Create a new request
- */
-export const createRequest = async (req: Request, res: Response) => {
-  try {
-    const { employeeId, type, requestType, title, description, priority, isAnonymous } = req.body;
+export type RequestType =
+  | 'salary_negotiation'
+  | 'promotion'
+  | 'benefits_adjustment'
+  | 'harassment_complaint'
+  | 'workload_concern'
+  | 'training_request'
+  | 'internal_mobility'
+  | 'general_inquiry';
 
-    const newRequest = new RequestModel({
-      employeeId,
-      type,
-      requestType,
-      title,
-      description,
-      priority: priority || 'medium',
-      status: 'draft',
-      isAnonymous: isAnonymous ?? false,
-      conversationData: { messages: [], collectedData: {}, summary: '' }
-    });
+export type RequestStatus = 'draft' | 'submitted' | 'under_review' | 'resolved' | 'rejected';
 
-    await newRequest.save();
-    return res.status(201).json({ ok: true, request: newRequest });
-  } catch (err: any) {
-    console.error('❌ createRequest error:', err);
-    return res.status(500).json({ error: err.message });
-  }
-};
+export interface IRequest extends Document {
+  employeeId: mongoose.Types.ObjectId;
+  type?: string;
+  requestType?: RequestType;
+  title?: string;
+  description?: string;
+  status: RequestStatus;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  conversationData?: {
+    messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>;
+    collectedData: Record<string, any>;
+    summary: string;
+  };
+  structuredData?: Record<string, any>;
+  hrNotes?: string;
+  reviewedBy?: mongoose.Types.ObjectId;
+  reviewedAt?: Date;
+  resolution?: {
+    decision: string;
+    feedback: string;
+    actionTaken: string;
+    resolvedAt: Date;
+  };
+  aiRecommendations?: {
+    suggestedActions: string[];
+    riskLevel: 'low' | 'medium' | 'high';
+    urgencyScore: number;
+    similarCases?: number;
+  };
+  aiSummary?: string;
+  aiScenarios?: Array<{ description: string; [key: string]: any }>;
+  isAnonymous: boolean;
+  consentGiven?: boolean;
+  pdfReportUrl?: string;
+}
 
-/**
- * Add a message and get AI response
- */
-export const interactWithRequest = async (req: Request, res: Response) => {
-  try {
-    const { requestId } = req.params;
-    const { message } = req.body;
+const RequestSchema = new Schema<IRequest>(
+  {
+    employeeId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    type: { type: String },
+    requestType: {
+      type: String,
+      enum: [
+        'salary_negotiation',
+        'promotion',
+        'benefits_adjustment',
+        'harassment_complaint',
+        'workload_concern',
+        'training_request',
+        'internal_mobility',
+        'general_inquiry',
+      ],
+    },
+    title: { type: String },
+    description: { type: String },
+    status: {
+      type: String,
+      enum: ['draft', 'submitted', 'under_review', 'resolved', 'rejected'],
+      default: 'draft',
+    },
+    priority: {
+      type: String,
+      enum: ['low', 'medium', 'high', 'urgent'],
+      default: 'medium',
+    },
+    conversationData: {
+      messages: [
+        {
+          role: { type: String, enum: ['user', 'assistant'] },
+          content: String,
+          timestamp: { type: Date, default: Date.now },
+        },
+      ],
+      collectedData: Schema.Types.Mixed,
+      summary: String,
+    },
+    structuredData: Schema.Types.Mixed,
+    hrNotes: String,
+    reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    reviewedAt: Date,
+    resolution: {
+      decision: String,
+      feedback: String,
+      actionTaken: String,
+      resolvedAt: Date,
+    },
+    aiRecommendations: {
+      suggestedActions: [String],
+      riskLevel: { type: String, enum: ['low', 'medium', 'high'] },
+      urgencyScore: Number,
+      similarCases: Number,
+    },
+    aiSummary: String,
+    aiScenarios: [Schema.Types.Mixed],
+    isAnonymous: { type: Boolean, default: false },
+    consentGiven: { type: Boolean, default: true },
+    pdfReportUrl: String,
+  },
+  { timestamps: true }
+);
 
-    if (!mongoose.Types.ObjectId.isValid(requestId)) {
-      return res.status(400).json({ error: 'Invalid request ID' });
-    }
+RequestSchema.index({ employeeId: 1, createdAt: -1 });
+RequestSchema.index({ status: 1, priority: -1 });
+RequestSchema.index({ requestType: 1 });
 
-    const requestDoc = await RequestModel.findById(requestId);
-    if (!requestDoc) return res.status(404).json({ error: 'Request not found' });
-
-    // Initialize conversationData if missing
-    if (!requestDoc.conversationData) {
-      requestDoc.conversationData = { messages: [], collectedData: {}, summary: '' };
-    }
-
-    // Add user message
-    requestDoc.conversationData.messages.push({ role: 'user', content: message, timestamp: new Date() });
-
-    // Call AI to get response
-    const aiResponse = await generateAIResponse(message, requestDoc.conversationData.messages);
-
-    // Add AI response to conversation
-    requestDoc.conversationData.messages.push({ role: 'assistant', content: aiResponse, timestamp: new Date() });
-
-    await requestDoc.save();
-    return res.json({ ok: true, aiResponse, request: requestDoc });
-  } catch (err: any) {
-    console.error('❌ interactWithRequest error:', err);
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * Submit request (changes status to 'submitted')
- */
-export const submitRequest = async (req: Request, res: Response) => {
-  try {
-    const { requestId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(requestId)) {
-      return res.status(400).json({ error: 'Invalid request ID' });
-    }
-
-    const requestDoc = await RequestModel.findById(requestId);
-    if (!requestDoc) return res.status(404).json({ error: 'Request not found' });
-
-    requestDoc.status = 'submitted';
-    await requestDoc.save();
-
-    return res.json({ ok: true, request: requestDoc });
-  } catch (err: any) {
-    console.error('❌ submitRequest error:', err);
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * Get all requests
- */
-export const getRequests = async (_req: Request, res: Response) => {
-  try {
-    const requests = await RequestModel.find().populate('employeeId', 'firstName lastName email');
-    return res.json({ ok: true, requests });
-  } catch (err: any) {
-    console.error('❌ getRequests error:', err);
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * Get single request
- */
-export const getRequest = async (req: Request, res: Response) => {
-  try {
-    const { requestId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(requestId)) {
-      return res.status(400).json({ error: 'Invalid request ID' });
-    }
-
-    const requestDoc = await RequestModel.findById(requestId).populate('employeeId', 'firstName lastName email');
-    if (!requestDoc) return res.status(404).json({ error: 'Request not found' });
-
-    return res.json({ ok: true, request: requestDoc });
-  } catch (err: any) {
-    console.error('❌ getRequest error:', err);
-    return res.status(500).json({ error: err.message });
-  }
-};
+// ✅ Export both the interface and the model
+export { IRequest };
+export default mongoose.model<IRequest>('Request', RequestSchema);
