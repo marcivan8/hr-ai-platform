@@ -32,6 +32,37 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+api.interceptors.response.use(
+  (response) => {
+    // Log successful auth responses for debugging
+    if (response.config.url?.includes('/auth/')) {
+      console.log('Auth response:', {
+        url: response.config.url,
+        data: response.data,
+        hasToken: !!response.data?.token,
+        hasUser: !!response.data?.user,
+        userRole: response.data?.user?.role
+      });
+    }
+    return response;
+  },
+  (error) => {
+    // Enhanced error logging
+    console.error('API Error:', {
+      url: error.config?.url,
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+    
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
 
 // API d'authentification
 export const authAPI = {

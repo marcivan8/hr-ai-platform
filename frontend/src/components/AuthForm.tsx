@@ -41,20 +41,31 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onLogin, onSuccess }) => {
 
       const { token, user } = response.data;
       
+      // Validate user object
+      if (!user || !user.email) {
+        throw new Error('Invalid user data received from server');
+      }
+
+      // Ensure role exists with default fallback
+      const userData = {
+        ...user,
+        role: user.role || 'employee'
+      };
+      
       // Stocker le token et l'utilisateur
       localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('user', JSON.stringify(userData));
 
       // Appeler les callbacks
       if (onSuccess) {
-        onSuccess(token, user);
+        onSuccess(token, userData);
       }
       if (onLogin) {
-        onLogin(user);
+        onLogin(userData);
       }
 
       // Rediriger selon le rôle
-      if (user.role === 'hr' || user.role === 'admin') {
+      if (userData.role === 'hr' || userData.role === 'admin') {
         window.location.href = '/hr';
       } else {
         window.location.href = '/dashboard';
@@ -63,6 +74,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onLogin, onSuccess }) => {
       console.error('Auth error:', err);
       const message = err.response?.data?.error || 
                      err.response?.data?.message || 
+                     err.message ||
                      'Une erreur est survenue lors de l\'authentification';
       setError(message);
     } finally {

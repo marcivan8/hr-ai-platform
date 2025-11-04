@@ -14,37 +14,29 @@ export async function register(req: Request, res: Response): Promise<Response> {
       password: hashed, 
       firstName: firstName || name?.split(' ')[0] || '',
       lastName: lastName || name?.split(' ').slice(1).join(' ') || '',
-      role 
+      role: role || 'employee' // Default to employee if not specified
     });
     await user.save();
-    return res.json({ ok: true });
+    
+    // Generate token for immediate login after registration
+    const token = jwt.sign({ id: user._id, role: user.role }, config.jwtSecret, { expiresIn: '8h' });
+    
+    // Return user data with token
+    return res.json({ 
+      ok: true,
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role || 'employee',
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: `${user.firstName} ${user.lastName}`.trim(),
+        department: user.department,
+        position: user.position
+      }
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
-}
-
-export async function login(req: Request, res: Response): Promise<Response> {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email }).select('+password');
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-  if (!user.password) return res.status(403).json({ error: 'No local login' });
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(401).json({ error: 'Invalid credentials' });
-  
-  const token = jwt.sign({ id: user._id, role: user.role }, config.jwtSecret, { expiresIn: '8h' });
-  
-  // Recharger l'utilisateur pour avoir accès aux virtuals
-  const userWithVirtuals = await User.findById(user._id);
-  
-  return res.json({ 
-    token, 
-    user: { 
-      id: user._id, 
-      email: user.email, 
-      role: user.role, 
-      firstName: user.firstName,
-      lastName: user.lastName,
-      name: userWithVirtuals?.name || `${user.firstName} ${user.lastName}`.trim()
-    } 
-  });
 }
