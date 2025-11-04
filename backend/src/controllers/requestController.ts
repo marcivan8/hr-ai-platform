@@ -2,6 +2,7 @@ import { Request as ExRequest, Response } from 'express';
 import ReqModel from '../models/Request';
 import { Message } from '../models/Message';
 import * as aiService from '../services/aiService';
+import { generateAIResponse } from "../services/aiService";
 import { generatePDF } from '../services/pdfService';
 import path from 'path';
 import fs from 'fs';
@@ -20,6 +21,31 @@ interface AuthRequest extends ExRequest {
 // -----------------------
 // 📌 Create a Request
 // -----------------------
+export const askFollowUp = async (req: Request, res: Response) => {
+  try {
+    const { requestId, userMessage, history } = req.body;
+
+    // fetch request
+    const request = await RequestModel.findById(requestId);
+    if (!request) return res.status(404).json({ error: "Request not found" });
+
+    // include current request data in prompt
+    const prompt = `
+    You are assisting with an HR request. Current data:
+    ${JSON.stringify(request, null, 2)}
+    User input: ${userMessage}
+    Generate next follow-up questions to collect all info for a complete report.
+    `;
+
+    const aiReply = await generateAIResponse(prompt, history);
+
+    res.json({ ok: true, aiReply });
+  } catch (err: any) {
+    console.error("❌ AI follow-up error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export async function createRequest(req: AuthRequest, res: Response) {
   try {
     const { type, title, description } = req.body;
