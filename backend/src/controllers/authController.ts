@@ -48,7 +48,7 @@ export async function login(req: Request, res: Response): Promise<Response> {
   if (!email || !password) return res.status(400).json({ error: 'Missing fields' });
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select('+password');
 
     if (!user) return res.status(400).json({ error: 'Invalid credentials' });
 
