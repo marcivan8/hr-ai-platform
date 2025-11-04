@@ -3,68 +3,81 @@ import config from '../config';
 import OpenAI from 'openai';
 
 export interface IMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp?: Date | string;
 }
 
 const openAiClient = config.openaiApiKey ? new OpenAI({ apiKey: config.openaiApiKey }) : null;
 
-// Generate a conversational reply using the message history (array of IMessage)
-// Returns { reply: string, structured?: Record<string, any> }
+/**
+ * Transform your internal messages to the OpenAI chat message shape.
+ * We use `any` for messages to avoid mismatched strict SDK types when function messages are not used.
+ */
+function toOpenAiMessages(history: IMessage[], systemPrompt?: string) {
+  const messages: any[] = [];
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+
+  for (const m of history) {
+    // map our 'assistant'|'user' to allowed roles
+    const role = m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user';
+    messages.push({ role, content: m.content });
+  }
+  return messages;
+}
+
+/**
+ * generateAIResponse
+ * - userPrompt: latest user message (string)
+ * - history: previous messages (IMessage[])
+ * returns { reply, structured }
+ */
 export async function generateAIResponse(userPrompt: string, history: IMessage[]) {
   try {
-    // Build messages for the model (system + history + latest user)
-    const messages = [
-      {
-        role: 'system',
-        content:
-          "You are an HR assistant. Ask structured clarifying questions to collect all details needed to prepare an HR dossier (salary expectations, current salary, manager, job title, dates, reasons, supporting evidence). When you have enough information say clearly: 'La demande est complète' (in French). Prefer French answers if the user speaks French."
-      },
-      // history -> map to model format
-      ...history.map((m) => ({
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        content: m.content
-      })),
-      { role: 'user', content: userPrompt }
-    ];
+    const systemPrompt =
+      "Tu es un assistant RH. Pose des questions structurées et claires pour collecter toutes les informations nécessaires (salaire actuel, salaire souhaité, date d'effet, manager, poste, raisons, preuves). Répond en français quand l'utilisateur parle français. Quand tu as toutes les infos, indique clairement 'La demande est complète'.";
+
+    // Build messages for model: system + history + latest user
+    const openaiMessages = toOpenAiMessages(history || [], systemPrompt);
+    openaiMessages.push({ role: 'user', content: userPrompt });
 
     if (!openAiClient) {
-      // Fallback simple heuristic if no API key set (development)
-      const fallbackReply = "Réponse IA (mode fallback) — merci, pouvez-vous préciser la date d'effet et le montant souhaité ?";
-      return { reply: fallbackReply, structured: {} };
+      // Development fallback (no OpenAI key)
+      const fallback = `FALLBACK: Merci pour votre message. Pouvez-vous préciser la date d'effet souhaitée et le montant visé ?`;
+      return { reply: fallback, structured: {} };
     }
 
-    // call OpenAI chat completion
     const resp: any = await openAiClient.chat.completions.create({
-      model: 'gpt-4o-mini', // change to available model in your plan
-      messages,
+      model: 'gpt-4o-mini', // adapt to available model in your account
+      messages: openaiMessages,
       temperature: 0.2,
       max_tokens: 800
     });
 
-    const reply = resp?.choices?.[0]?.message?.content ?? '';
+    const reply: string = resp?.choices?.[0]?.message?.content ?? '';
 
-    // attempt to extract structured data after assistant reply
+    // Attempt to extract structured fields (best-effort)
     const structured = await extractStructuredData([...history, { role: 'user', content: userPrompt }]);
 
     return { reply, structured };
   } catch (err: any) {
-    console.error('AI service error:', err?.message || err);
+    console.error('generateAIResponse error:', err?.message || err);
     throw err;
   }
 }
 
-// Extract structured fields from the conversation (returns an object)
+/**
+ * extractStructuredData(history)
+ * Ask the model to return JSON with structured keys. If no OpenAI key -> return {}
+ */
 export async function extractStructuredData(history: IMessage[]) {
   try {
     if (!openAiClient) return {};
 
     const systemPrompt =
-      `You are an assistant that extracts structured HR data from a conversation. 
-Output ONLY valid JSON (no explanation) with these keys (use null when unknown): 
+      `You are an assistant that extracts structured HR data from a conversation. Output ONLY valid JSON (no explanation) with keys (use null if unknown):
 {
-  "issue_type": string, // salary_negotiation|promotion|harassment_complaint|workload_concern|training_request|internal_mobility|general_inquiry
+  "issue_type": "salary_negotiation|promotion|harassment_complaint|workload_concern|training_request|internal_mobility|general_inquiry",
   "current_salary": string|null,
   "desired_salary": string|null,
   "salary_currency": string|null,
@@ -77,7 +90,7 @@ Output ONLY valid JSON (no explanation) with these keys (use null when unknown):
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...history.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))
+      ...history.map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content }))
     ];
 
     const resp: any = await openAiClient.chat.completions.create({
@@ -87,12 +100,16 @@ Output ONLY valid JSON (no explanation) with these keys (use null when unknown):
       max_tokens: 400
     });
 
-    const raw = resp?.choices?.[0]?.message?.content ?? '';
-    // Try to parse first JSON block in response
+    const raw: string = resp?.choices?.[0]?.message?.content ?? '';
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return {};
-    const parsed = JSON.parse(jsonMatch[0]);
-    return parsed;
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed;
+    } catch (parseErr) {
+      console.warn('extractStructuredData: failed to parse JSON, returning empty', parseErr);
+      return {};
+    }
   } catch (err: any) {
     console.error('extractStructuredData error:', err?.message || err);
     return {};

@@ -1,23 +1,27 @@
 // src/controllers/requestController.ts
 import { Request, Response } from 'express';
 import RequestModel, { IRequest } from '../models/Request';
-import { generateAIResponse, IMessage } from '../services/aiService';
+import { generateAIResponse, extractStructuredData, IMessage } from '../services/aiService';
 import path from 'path';
 import fs from 'fs';
 import { generatePDF } from '../services/pdfService';
 import mongoose from 'mongoose';
 
-function ensureConversation(reqDoc: IRequest) {
-  if (!reqDoc.history) reqDoc.history = [];
-  if (!reqDoc.conversationData) {
-    reqDoc.conversationData = { messages: [], collectedData: {}, summary: '' } as any;
-  }
+function ensureConversation(reqDoc: Partial<IRequest>) {
+  // support both conversationData.messages and legacy history
+  if (!reqDoc.history) (reqDoc as any).history = [];
+  if (!reqDoc.conversationData) (reqDoc as any).conversationData = { messages: [], collectedData: {}, summary: '' };
+  if (!Array.isArray((reqDoc as any).conversationData.messages)) (reqDoc as any).conversationData.messages = [];
 }
 
-// Create a new request (draft)
+/**
+ * Create request (draft)
+ * POST /api/requests/create
+ * body: { employeeId, title, description, requestType?, priority? }
+ */
 export async function createRequest(req: Request, res: Response) {
   try {
-    const { employeeId, title, description, requestType, type, priority } = req.body;
+    const { employeeId, title, description, requestType, priority } = req.body;
     if (!employeeId || !title || !description) {
       return res.status(400).json({ error: 'Missing fields' });
     }
@@ -26,19 +30,19 @@ export async function createRequest(req: Request, res: Response) {
       employeeId,
       title,
       description,
-      requestType: requestType || type || 'general_inquiry',
+      requestType: requestType || 'general_inquiry',
       status: 'draft',
       priority: priority || 'medium',
       history: [],
       conversationData: { messages: [], collectedData: {}, summary: '' }
     });
 
-    await newRequest.save();
+    // initial user message saved into history for AI context
+    const initialMsg: IMessage = { role: 'user', content: description, timestamp: new Date() };
+    newRequest.history.push(initialMsg as any);
+    newRequest.conversationData!.messages.push(initialMsg as any);
 
-    // option: add initial user message into history (helps AI context)
-    newRequest.history.push({ role: 'user', content: description, timestamp: new Date() } as any);
     await newRequest.save();
-
     return res.status(201).json({ ok: true, request: newRequest });
   } catch (err: any) {
     console.error('createRequest error:', err);
@@ -46,7 +50,11 @@ export async function createRequest(req: Request, res: Response) {
   }
 }
 
-// Interact: user sends message -> AI reply returned and stored
+/**
+ * Interact with AI
+ * POST /api/requests/interact/:requestId
+ * body: { message: string }
+ */
 export async function interact(req: Request, res: Response) {
   try {
     const { requestId } = req.params;
@@ -60,25 +68,44 @@ export async function interact(req: Request, res: Response) {
 
     ensureConversation(reqDoc);
 
-    // add user message
+    // Push user message
     const userMsg: IMessage = { role: 'user', content: message, timestamp: new Date() };
-    reqDoc.history.push(userMsg);
-    reqDoc.conversationData!.messages.push(userMsg as any);
+    (reqDoc as any).history.push(userMsg);
+    (reqDoc as any).conversationData.messages.push(userMsg);
 
-    // call AI
-    const { reply, structured } = await generateAIResponse(message, reqDoc.history as any);
+    // Prepare history to pass to AI (use history array for context)
+    const historyForAi: IMessage[] = ((reqDoc as any).history || []).map((m: any) => ({
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp
+    }));
 
-    // store assistant reply
+    // Generate AI reply
+    const { reply, structured } = await generateAIResponse(message, historyForAi);
+
     const assistantMsg: IMessage = { role: 'assistant', content: reply, timestamp: new Date() };
-    reqDoc.history.push(assistantMsg);
-    reqDoc.conversationData!.messages.push(assistantMsg as any);
+    (reqDoc as any).history.push(assistantMsg);
+    (reqDoc as any).conversationData.messages.push(assistantMsg);
 
-    // merge structured extraction into collectedData
+    // Merge structured into conversationData.collectedData if present
     if (structured && typeof structured === 'object') {
-      reqDoc.conversationData!.collectedData = {
-        ...(reqDoc.conversationData!.collectedData || {}),
+      (reqDoc as any).conversationData.collectedData = {
+        ...((reqDoc as any).conversationData.collectedData || {}),
         ...structured
       };
+    } else {
+      // best-effort attempt to re-extract structured data from updated history
+      try {
+        const reExtract = await extractStructuredData(historyForAi.concat({ role: 'user', content: message }));
+        if (reExtract && typeof reExtract === 'object') {
+          (reqDoc as any).conversationData.collectedData = {
+            ...((reqDoc as any).conversationData.collectedData || {}),
+            ...reExtract
+          };
+        }
+      } catch (e) {
+        // ignore extraction errors
+      }
     }
 
     await reqDoc.save();
@@ -90,7 +117,10 @@ export async function interact(req: Request, res: Response) {
   }
 }
 
-// Submit request: mark submitted and generate PDF
+/**
+ * Submit request: mark as submitted, generate PDF and store url
+ * POST /api/requests/submit/:requestId
+ */
 export async function submitRequest(req: Request, res: Response) {
   try {
     const { requestId } = req.params;
@@ -102,7 +132,7 @@ export async function submitRequest(req: Request, res: Response) {
     reqDoc.status = 'submitted';
     await reqDoc.save();
 
-    // generate PDF (sync)
+    // Ensure uploads dir
     const uploadsDir = path.join(process.cwd(), 'uploads');
     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -122,7 +152,10 @@ export async function submitRequest(req: Request, res: Response) {
   }
 }
 
-// Get request by id
+/**
+ * Get a request by id
+ * GET /api/requests/:requestId
+ */
 export async function getRequestById(req: Request, res: Response) {
   try {
     const { requestId } = req.params;
@@ -130,6 +163,7 @@ export async function getRequestById(req: Request, res: Response) {
 
     const reqDoc = await RequestModel.findById(requestId).populate('employeeId', 'firstName lastName email');
     if (!reqDoc) return res.status(404).json({ error: 'Not found' });
+
     return res.json(reqDoc);
   } catch (err: any) {
     console.error('getRequestById error:', err);
@@ -137,10 +171,12 @@ export async function getRequestById(req: Request, res: Response) {
   }
 }
 
-// list requests (HR or employee)
-export async function listRequests(req: Request, res: Response) {
+/**
+ * List requests
+ * GET /api/requests/
+ */
+export async function listRequests(_req: Request, res: Response) {
   try {
-    // you can use req.user.role check if you have auth middleware
     const all = await RequestModel.find().sort({ createdAt: -1 }).populate('employeeId', 'firstName lastName email');
     return res.json(all);
   } catch (err: any) {
