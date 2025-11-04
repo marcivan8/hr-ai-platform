@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { IRequest, User, AuthResponse, DashboardStats } from '../types';
 
-const API_URL = process.env.REACT_APP_API_URL || 'https://hr-ai-platform.onrender.com/api';
+const API_URL = process.env.VITE_API_URL || 'https://hr-ai-platform.onrender.com/api';
 
 // Instance Axios principale
 const api: AxiosInstance = axios.create({

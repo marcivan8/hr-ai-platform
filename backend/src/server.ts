@@ -23,7 +23,10 @@ if (process.env.NODE_ENV === 'development') {
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
-  'http://hr-ai-platform-j49iu0vjl-marc-ivans-projects.vercel.app'
+  'http://localhost:5173', // Vite dev server
+  'https://hr-ai-platform-nzct85uw5-marc-ivans-projects.vercel.app',
+  'https://hr-ai-platform.vercel.app', // Add your production domain
+  /^https:\/\/hr-ai-platform-.*\.vercel\.app$/ // Allow all preview deployments
 ];
 
 app.use(cors({
@@ -31,13 +34,27 @@ app.use(cors({
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
+    // Check if origin matches allowed origins or regex patterns
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (typeof allowedOrigin === 'string') {
+        return origin === allowedOrigin;
+      }
+      if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return false;
+    });
+
+    if (isAllowed) {
       return callback(null, true);
     } else {
+      console.log('CORS blocked origin:', origin);
       return callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Ensure uploads directory exists
