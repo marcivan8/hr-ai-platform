@@ -44,26 +44,35 @@ export const askFollowUp = async (req: Request, res: Response): Promise<Response
 
     if (!requestDoc) return res.status(404).json({ error: "Request not found" });
 
-    // Initialize conversationData if undefined
+    // Ensure conversation container exists
     if (!requestDoc.conversationData) {
       requestDoc.conversationData = { messages: [], collectedData: {}, summary: "" };
     }
 
-    const messages = requestDoc.conversationData.messages.map(msg => ({
-      role: msg.role === "ai" ? "assistant" : msg.role,
+    // Prepare message history for AI call
+    const messages = (requestDoc.conversationData.messages || []).map(msg => ({
+      role: msg.role, 
       content: msg.content,
-      timestamp: msg.timestamp
     }));
 
-    // Add the latest user message
-    messages.push({ role: "user", content: userMessage, timestamp: new Date() });
+    // Add latest user message
+    messages.push({ role: "user", content: userMessage });
 
-    // Generate AI response
+    // Get AI response
     const aiReply = await generateAIResponse(userMessage, messages);
 
-    // Save AI response
-    requestDoc.conversationData.messages.push({ role: "user", content: userMessage, timestamp: new Date() });
-    requestDoc.conversationData.messages.push({ role: "assistant", content: aiReply, timestamp: new Date() });
+    // Save conversation to DB
+    requestDoc.conversationData.messages.push({
+      role: "user",
+      content: userMessage,
+      timestamp: new Date(),
+    });
+
+    requestDoc.conversationData.messages.push({
+      role: "assistant",
+      content: aiReply,
+      timestamp: new Date(),
+    });
 
     await requestDoc.save();
 
